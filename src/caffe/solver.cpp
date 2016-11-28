@@ -8,6 +8,7 @@
 #include "caffe/util/hdf5.hpp"
 #include "caffe/util/io.hpp"
 #include "caffe/util/upgrade_proto.hpp"
+#include "caffe/hdfs/stringpiece.h"
 
 namespace caffe {
 
@@ -429,6 +430,11 @@ void Solver<Dtype>::CheckSnapshotWritePermissions() {
   if (Caffe::root_solver() && param_.snapshot()) {
     CHECK(param_.has_snapshot_prefix())
         << "In solver params, snapshot is specified but snapshot_prefix is not";
+    StringPiece temp(param_.snapshot_prefix());
+    if (temp.starts_with("hdfs://")) {
+        return;
+    }
+
     string probe_filename = SnapshotFilename(".tempfile");
     std::ofstream probe_ofs(probe_filename.c_str());
     if (probe_ofs.good()) {
