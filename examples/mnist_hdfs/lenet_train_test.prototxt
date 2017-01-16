@@ -1,52 +1,40 @@
 name: "LeNet"
-# layer {
-#   name: "mnist"
-#   type: "Data"
-#   top: "data"
-#   top: "label"
-#   include {
-#     phase: TRAIN
-#   }
-#   transform_param {
-#     scale: 0.00390625
-#   }
-#   data_param {
-#     source: "examples/mnist/mnist_train_lmdb"
-#     batch_size: 64
-#     backend: LMDB
-#   }
-# }
-# layer {
-#   name: "mnist"
-#   type: "Data"
-#   top: "data"
-#   top: "label"
-#   include {
-#     phase: TEST
-#   }
-#   transform_param {
-#     scale: 0.00390625
-#   }
-#   data_param {
-#     source: "examples/mnist/mnist_test_lmdb"
-#     batch_size: 100
-#     backend: LMDB
-#   }
-# }
+
+#layer {
+#    name: "data"
+#    type: "ImageData"
+#    top: "data"
+#    top: "label"
+#    transform_param {
+#        scale: 0.00390625
+#    }
+#    image_data_param {
+#        source: "examples/mnist_hdfs/train_list"
+#        batch_size: 32
+#    }
+#    include {
+#        phase: TRAIN
+#    }
+#}
 
 layer {
     name: "data"
-    type: "ImageData"
+    type: "HdfsData"
     top: "data"
     top: "label"
-    image_data_param {
-        source: "examples/mnist/train_list"
+    transform_param {
+        scale: 0.00390625
+    }
+    hdfs_data_param {
+        source: "hdfs://192.168.184.39:8020/mnist_data"
         batch_size: 32
+        size_per_datum: 2365
     }
     include {
         phase: TRAIN
     }
 }
+
 
 layer {
   name: "conv1"
@@ -164,16 +152,7 @@ layer {
     }
   }
 }
-# layer {
-#   name: "accuracy"
-#   type: "Accuracy"
-#   bottom: "ip2"
-#   bottom: "label"
-#   top: "accuracy"
-#   include {
-#     phase: TEST
-#   }
-# }
+
 layer {
   name: "loss"
   type: "SoftmaxWithLoss"

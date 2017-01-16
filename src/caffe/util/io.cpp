@@ -34,97 +34,128 @@ namespace caffe {
     using google::protobuf::Message;
 
     bool ReadProtoFromTextFile(const char* filename, Message* proto) {
-        HadoopFileSystem hdfs;
         StringPiece src_filename = StringPiece(filename);
-        std::string dst_filename;
-        if (src_filename.starts_with("hdfs://")) {
-            MakeTempFilename(&dst_filename);
-            Status s = hdfs.CopyToLocal(src_filename.ToString(), "file://" + dst_filename);
-            if (!s.ok()) {
+        if(src_filename.starts_with("hdfs://")) {
+            HadoopFileSystem hdfs;
+            unsigned long long size;
+            hdfs.GetFileSize(src_filename.ToString(), &size);
+            std::shared_ptr<RandomAccessFile> raf;
+            Status status;
+            status = hdfs.NewRandomAccessFile(src_filename.ToString(), &raf);
+            if (!status.ok()) {
                 return false;
             }
-        } else {
-            dst_filename = src_filename.ToString();
-        }
 
-        int fd = open(dst_filename.c_str(), O_RDONLY);
-        CHECK_NE(fd, -1) << "File not found: " << filename;
-        FileInputStream* input = new FileInputStream(fd);
-        bool success = google::protobuf::TextFormat::Parse(input, proto);
-        delete input;
-        close(fd);
-        return success;
+            char* ch = new char[size + 1]();
+            StringPiece sp;
+            status = raf->Read(0, size, &sp, ch);
+            if (!status.ok()) {
+                return false;
+            }
+
+            bool success = google::protobuf::TextFormat::ParseFromString(sp.ToString(), proto);
+
+            delete ch;
+            return success;
+        } else {
+            int fd = open(filename, O_RDONLY);
+            CHECK_NE(fd, -1) << "File not found: " << filename;
+            FileInputStream* input = new FileInputStream(fd);
+            bool success = google::protobuf::TextFormat::Parse(input, proto);
+            delete input;
+            close(fd);
+            return success;
+        }
     }
 
     void WriteProtoToTextFile(const Message& proto, const char* filename) {
-        HadoopFileSystem hdfs;
         StringPiece dst_filename = StringPiece(filename);
-        std::string src_filename;
-        if (dst_filename.starts_with("hdfs://")) {
-            MakeTempFilename(&src_filename);
+        if(dst_filename.starts_with("hdfs://")) {
+            HadoopFileSystem hdfs;
+            std::shared_ptr<WritableFile> wf;
+            Status status;
+            status = hdfs.NewWritableFile(dst_filename.ToString(), &wf);
+            CHECK_EQ(status.ok(), true) << "can't open file: " << status;
+
+            std::string msg;
+            CHECK(google::protobuf::TextFormat::PrintToString(proto, &msg));
+
+            status = wf->Append(StringPiece(msg));
+            CHECK_EQ(status.ok(), true) << "can't write file: " << status;
+
+            wf->Close();
+
         } else {
-            src_filename = dst_filename.ToString();
-        }
-
-        int fd = open(src_filename.c_str(), O_WRONLY | O_CREAT | O_TRUNC, 0644);
-        FileOutputStream* output = new FileOutputStream(fd);
-        CHECK(google::protobuf::TextFormat::Print(proto, output));
-        delete output;
-        close(fd);
-
-        if (dst_filename.starts_with("hdfs://")) {
-            Status s = hdfs.CopyToRemote("file://" + src_filename, dst_filename.ToString());
-            CHECK_EQ(s.ok(), true) << "error: copy from" << src_filename << " to " << dst_filename << ": " << s;
+            int fd = open(filename, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            FileOutputStream* output = new FileOutputStream(fd);
+            CHECK(google::protobuf::TextFormat::Print(proto, output));
+            delete output;
+            close(fd);
         }
     }
 
     bool ReadProtoFromBinaryFile(const char* filename, Message* proto) {
-        HadoopFileSystem hdfs;
         StringPiece src_filename = StringPiece(filename);
-        std::string dst_filename;
-        if (src_filename.starts_with("hdfs://")) {
-            MakeTempFilename(&dst_filename);
-            Status s = hdfs.CopyToLocal(src_filename.ToString(), "file://" + dst_filename);
-            if (!s.ok()) {
+        if(src_filename.starts_with("hdfs://")) {
+            HadoopFileSystem hdfs;
+            unsigned long long size;
+            hdfs.GetFileSize(src_filename.ToString(), &size);
+            std::shared_ptr<RandomAccessFile> raf;
+            Status status;
+            status = hdfs.NewRandomAccessFile(src_filename.ToString(), &raf);
+            if (!status.ok()) {
                 return false;
             }
+
+            char* ch = new char[size + 1]();
+            StringPiece sp;
+            status = raf->Read(0, size, &sp, ch);
+            if (!status.ok()) {
+                return false;
+            }
+
+            bool success = proto->ParseFromString(sp.ToString());
+            delete ch;
+
+            return success;
         } else {
-            dst_filename = src_filename.ToString();
+            int fd = open(filename, O_RDONLY);
+            CHECK_NE(fd, -1) << "File not found: " << filename;
+            ZeroCopyInputStream* raw_input = new FileInputStream(fd);
+            CodedInputStream* coded_input = new CodedInputStream(raw_input);
+            coded_input->SetTotalBytesLimit(kProtoReadBytesLimit, 536870912);
+
+            bool success = proto->ParseFromCodedStream(coded_input);
+
+            delete coded_input;
+            delete raw_input;
+            close(fd);
+            return success;
         }
-
-        int fd = open(dst_filename.c_str(), O_RDONLY);
-        CHECK_NE(fd, -1) << "File not found: " << filename;
-        ZeroCopyInputStream* raw_input = new FileInputStream(fd);
-        CodedInputStream* coded_input = new CodedInputStream(raw_input);
-        coded_input->SetTotalBytesLimit(kProtoReadBytesLimit, 536870912);
-
-        bool success = proto->ParseFromCodedStream(coded_input);
-
-        delete coded_input;
-        delete raw_input;
-        close(fd);
-        return success;
     }
 
     void WriteProtoToBinaryFile(const Message& proto, const char* filename) {
-        HadoopFileSystem hdfs;
         StringPiece dst_filename = StringPiece(filename);
-        std::string src_filename;
-        if (dst_filename.starts_with("hdfs://")) {
-            MakeTempFilename(&src_filename);
+        if(dst_filename.starts_with("hdfs://")) {
+            HadoopFileSystem hdfs;
+            std::shared_ptr<WritableFile> wf;
+            Status status;
+            status = hdfs.NewWritableFile(dst_filename.ToString(), &wf);
+            CHECK_EQ(status.ok(), true) << "can't open file: " << status;
+
+            std::string msg;
+            proto.SerializeToString(&msg);
+
+            status = wf->Append(StringPiece(msg));
+            CHECK_EQ(status.ok(), true) << "can't write file: " << status;
+
+            wf->Close();
+
         } else {
-            src_filename = dst_filename.ToString();
+            fstream output(filename, ios::out | ios::trunc | ios::binary);
+            CHECK(proto.SerializeToOstream(&output));
+            output.close();
         }
-
-        fstream output(src_filename, ios::out | ios::trunc | ios::binary);
-        CHECK(proto.SerializeToOstream(&output));
-        output.close();
-
-       if (dst_filename.starts_with("hdfs://")) {
-            Status s = hdfs.CopyToRemote("file://" + src_filename, dst_filename.ToString());
-            CHECK_EQ(s.ok(), true) << "error: copy from " << src_filename << " to " << dst_filename << ": " << s;
-        }
-
     }
 
 #ifdef USE_OPENCV
@@ -140,11 +171,15 @@ namespace caffe {
             unsigned long long size;
             hdfs.GetFileSize(src_filename.ToString(), &size);
             std::shared_ptr<RandomAccessFile> raf;
-            hdfs.NewRandomAccessFile(src_filename.ToString(), &raf);
+            Status status;
+            status = hdfs.NewRandomAccessFile(src_filename.ToString(), &raf);
+            CHECK_EQ(status.ok(), true) << "can't open file: " << status;
 
             char* ch = new char[size + 1]();
             StringPiece sp;
-            raf->Read(0, size, &sp, ch);
+            status = raf->Read(0, size, &sp, ch);
+            CHECK_EQ(status.ok(), true) << "can't read file: " << status;
+
             std::vector<char> vec_data(sp.data(), sp.data() + sp.size());
             cv_img_origin = cv::imdecode(vec_data, cv_read_flag);
 
@@ -222,35 +257,41 @@ namespace caffe {
 
     bool ReadFileToDatum(const string& filename, const int label,
             Datum* datum) {
-        HadoopFileSystem hdfs;
         StringPiece src_filename = StringPiece(filename);
-        std::string dst_filename;
-        if (src_filename.starts_with("hdfs://")) {
-            MakeTempFilename(&dst_filename);
-            Status s = hdfs.CopyToLocal(src_filename.ToString(), "file://" + dst_filename);
-            if (!s.ok()) {
-                return false;
-            }
-        } else {
-            dst_filename = src_filename.ToString();
-        }
+        if(src_filename.starts_with("hdfs://")) {
+            HadoopFileSystem hdfs;
+            unsigned long long size;
+            hdfs.GetFileSize(src_filename.ToString(), &size);
+            std::shared_ptr<RandomAccessFile> raf;
+            hdfs.NewRandomAccessFile(src_filename.ToString(), &raf);
 
+            char* ch = new char[size + 1]();
+            StringPiece sp;
+            raf->Read(0, size, &sp, ch);
 
-        std::streampos size;
-
-        fstream file(dst_filename.c_str(), ios::in|ios::binary|ios::ate);
-        if (file.is_open()) {
-            size = file.tellg();
-            std::string buffer(size, ' ');
-            file.seekg(0, ios::beg);
-            file.read(&buffer[0], size);
-            file.close();
-            datum->set_data(buffer);
+            datum->set_data(sp.ToString());
             datum->set_label(label);
             datum->set_encoded(true);
+            delete ch;
+
             return true;
         } else {
-            return false;
+            std::streampos size;
+
+            fstream file(filename, ios::in|ios::binary|ios::ate);
+            if (file.is_open()) {
+                size = file.tellg();
+                std::string buffer(size, ' ');
+                file.seekg(0, ios::beg);
+                file.read(&buffer[0], size);
+                file.close();
+                datum->set_data(buffer);
+                datum->set_label(label);
+                datum->set_encoded(true);
+                return true;
+            } else {
+                return false;
+            }
         }
     }
 
